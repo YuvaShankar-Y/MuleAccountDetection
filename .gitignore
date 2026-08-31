@@ -14,3 +14,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ipynb_checkpoints/
+
+# Architecture Decisions Log
+decision.md
+

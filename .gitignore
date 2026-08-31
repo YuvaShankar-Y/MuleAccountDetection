@@ -1,0 +1,16 @@
+# Java keystores and truststores
+certs/*.jks
+certs/*.pem
+certs/*.key
+certs/*.crt
+certs/*.csr
+certs/*.srl
+
+# Local data volumes
+data/
+
+# Python caching
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/

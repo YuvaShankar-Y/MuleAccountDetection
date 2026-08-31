@@ -1,0 +1,18 @@
+{
+  "name": "neo4j-cdc-source",
+  "config": {
+    "connector.class": "streams.kafka.connect.source.Neo4jSourceConnector",
+    "topic": "graph-mutations-log",
+    "neo4j.server.uri": "bolt://neo4j:7687",
+    "neo4j.authentication.basic.username": "neo4j",
+    "neo4j.authentication.basic.password": "password",
+    "neo4j.streaming.poll.interval.msecs": "5000",
+    "neo4j.streaming.from": "NOW",
+    "neo4j.enforce.schema": "false",
+    "neo4j.source.query": "MATCH (n) WHERE n:Account OR n:Device RETURN n",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": false,
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": false
+  }
+}

@@ -266,17 +266,45 @@ DASHBOARD_HTML = """
                 
                 const nodesArray = data.nodes.map(n => {
                     const isTarget = n.id === currentAccount;
+                    
+                    // Default colors
+                    let bgColor = '#3b82f6'; // Blue
+                    let borderColor = '#60a5fa';
+                    
+                    // Assign colors based on entity type
+                    if (n.type === 'Criminal') {
+                        bgColor = '#b91c1c'; // Dark Red
+                        borderColor = '#ef4444';
+                    } else if (n.type === 'Mule') {
+                        bgColor = '#ea580c'; // Orange
+                        borderColor = '#f97316';
+                    } else if (n.type === 'ShellCompany') {
+                        bgColor = '#7e22ce'; // Purple
+                        borderColor = '#a855f7';
+                    } else if (n.type === 'Bank') {
+                        bgColor = '#047857'; // Green
+                        borderColor = '#10b981';
+                    } else if (n.type === 'Beneficiary') {
+                        bgColor = '#1d4ed8'; // Royal Blue
+                        borderColor = '#3b82f6';
+                    }
+                    
+                    if (isTarget) {
+                        bgColor = '#ef4444'; // Override target with bright red
+                        borderColor = '#ffffff';
+                    }
+
                     return {
                         id: n.id,
-                        label: `\n${n.id}`,
+                        label: `\n${n.id}\n(${n.type || 'Account'})`,
                         shape: 'dot',
                         size: isTarget ? 24 : 16,
                         color: {
-                            background: isTarget ? '#ef4444' : '#3b82f6',
-                            border: isTarget ? '#ffffff' : '#60a5fa',
+                            background: bgColor,
+                            border: borderColor,
                             highlight: { background: '#f59e0b', border: '#ffffff' }
                         },
-                        font: { color: '#f8fafc', size: 13, face: 'Inter', multi: 'md' }
+                        font: { color: '#f8fafc', size: 11, face: 'Inter', multi: 'md' }
                     };
                 });
 
@@ -438,8 +466,8 @@ def get_full_graph():
         edges = []
         with driver.session() as session:
             # Query nodes
-            n_recs = session.run("MATCH (a:Account) RETURN a.account_id AS id").data()
-            nodes = [{"id": r["id"]} for r in n_recs if r.get("id")]
+            n_recs = session.run("MATCH (a:Account) RETURN a.account_id AS id, coalesce(a.entity_type, 'Account') AS type").data()
+            nodes = [{"id": r["id"], "type": r["type"]} for r in n_recs if r.get("id")]
 
             # Query TRANSFER relationships
             r_recs = session.run("MATCH (a:Account)-[r:TRANSFER]->(b:Account) RETURN a.account_id AS source, b.account_id AS target, coalesce(r.amount, 0.0) AS amount").data()

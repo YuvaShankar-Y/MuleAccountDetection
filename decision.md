@@ -48,3 +48,10 @@ This document tracks all meaningful architectural and technical decisions made d
 - **XGBoost Classifier:** Gradient Boosted Decision Trees outperform raw GNNs on heterogeneous tabular features (transaction velocity, Betti-1 persistence, degree). Concatenating GNN embeddings with tabular features gives XGBoost complete contextual and structural visibility.
 - **Imbalance Handling:** Mule accounts are extremely rare ($< 5\%$ of total accounts). Setting `scale_pos_weight = N_neg / N_pos` in `XGBClassifier` prevents majority-class bias.
 - **Triton Ensemble DAG:** NVIDIA Triton handles high-throughput serving by orchestrating a 4-step pipeline (`feature_fetcher` $\rightarrow$ `gnn_embedder` $\rightarrow$ `feature_combiner` $\rightarrow$ `xgb_classifier` FIL) in a single gRPC endpoint call, eliminating inter-service HTTP serialization bottlenecks.
+
+## 10. Explainability & Human-in-the-Loop Active Learning (Phase 5)
+*Decision:* Implemented a dual SHAP + GNNExplainer engine wrapped in FastAPI, paired with a Kafka-driven active learning retraining consumer.
+*Reasoning:* 
+- **SHAP TreeExplainer & GNNExplainer:** Fraud analysts require mathematical rationale for flagged alerts. SHAP quantifies top tabular/topological drivers (e.g., $+30\%$ risk from Betti-1 loop count), while GNNExplainer isolates the key 2-hop transaction neighborhood.
+- **Kafka-Driven Disposition Stream:** Analyst verdicts (`TRUE_POSITIVE` / `FALSE_POSITIVE`) are published to the `analyst-feedback` Kafka topic to ensure decoupling between web API and background MLOps.
+- **Continuous Incremental Retraining:** The `retrain.py` consumer collects ground truth dispositions and invokes `xgb.train(..., xgb_model=existing_model)` every 100 dispositions, updating model weights incrementally and triggering Triton model reloads via REST API without downtime.

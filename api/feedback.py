@@ -1,10 +1,11 @@
 # api/feedback.py
 """
-Analyst Feedback & Explanation API
-==================================
+Analyst Feedback & Explanation API + Web UI Dashboard
+=====================================================
 FastAPI web service providing:
-1. GET  /api/alerts/{alert_id}/explanation: Fetch SHAP + GNN explanation report.
-2. POST /api/alerts/{alert_id}/disposition: Analyst disposition submitter to Kafka 'analyst-feedback'.
+1. GET  /                         : Interactive Analyst UI Dashboard (Visual SHAP + 2-Hop Graph + Disposition buttons)
+2. GET  /api/alerts/{id}/explanation : Fetch SHAP + GNN explanation report (JSON)
+3. POST /api/alerts/{id}/disposition : Analyst disposition submitter to Kafka 'analyst-feedback'
 """
 
 import json
@@ -14,6 +15,7 @@ from typing import Optional, Dict, Any
 from enum import Enum
 
 from fastapi import FastAPI, HTTPException, Path, BackgroundTasks
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from kafka import KafkaProducer
 
@@ -32,10 +34,7 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Global Explainer instance
 explainer = HybridExplainer()
-
-# Kafka Producer initialization (lazy / resilient)
 producer: Optional[KafkaProducer] = None
 
 def get_kafka_producer() -> KafkaProducer:
@@ -49,7 +48,6 @@ def get_kafka_producer() -> KafkaProducer:
             )
         except Exception as e:
             logger.warning(f"Kafka Producer connection deferred/failed: {e}")
-            # Mock producer for local/testing environments without Kafka
             class MockProducer:
                 def send(self, topic, value):
                     logger.info(f"[MOCK KAFKA] Sent to {topic}: {value}")
@@ -60,7 +58,6 @@ def get_kafka_producer() -> KafkaProducer:
     return producer
 
 
-# Data Models
 class DispositionStatus(str, Enum):
     TRUE_POSITIVE = "TRUE_POSITIVE"
     FALSE_POSITIVE = "FALSE_POSITIVE"
@@ -80,10 +77,204 @@ class DispositionResponse(BaseModel):
     topic: str
 
 
-# Endpoints
-@app.get("/")
-def health_check():
-    return {"status": "HEALTHY", "service": "Analyst Feedback & XAI API"}
+# Dashboard HTML Page
+DASHBOARD_HTML = """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mule Detection - Analyst Fraud Investigation Workspace</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-bg: #1e293b;
+            --accent-red: #ef4444;
+            --accent-green: #10b981;
+            --accent-blue: #3b82f6;
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --border-color: #334155;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background-color: var(--bg-dark); color: var(--text-main); padding: 24px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid var(--border-color); }
+        .header h1 { font-size: 22px; font-weight: 700; background: linear-gradient(90deg, #60a5fa, #a855f7); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .grid-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .card { background-color: var(--panel-bg); border-radius: 12px; padding: 20px; border: 1px solid var(--border-color); }
+        .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #cbd5e1; display: flex; align-items: center; justify-content: space-between; }
+        .badge-danger { background-color: rgba(239, 68, 68, 0.2); color: var(--accent-red); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid var(--accent-red); }
+        .badge-success { background-color: rgba(16, 185, 129, 0.2); color: var(--accent-green); padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 700; border: 1px solid var(--accent-green); }
+        .metrics-row { display: flex; gap: 16px; margin-bottom: 16px; }
+        .metric-box { flex: 1; background: #0f172a; padding: 14px; border-radius: 8px; border: 1px solid #334155; }
+        .metric-box label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .metric-box val { display: block; font-size: 20px; font-weight: 700; margin-top: 4px; }
+        .edge-list { list-style: none; }
+        .edge-item { display: flex; justify-content: space-between; padding: 10px; border-bottom: 1px solid var(--border-color); font-size: 13px; }
+        .edge-item:last-child { border-bottom: none; }
+        .edge-score { color: #60a5fa; font-weight: 600; }
+        textarea { width: 100%; height: 80px; background: #0f172a; border: 1px solid var(--border-color); border-radius: 8px; color: white; padding: 10px; font-size: 13px; margin-top: 12px; resize: none; }
+        .btn-group { display: flex; gap: 12px; margin-top: 16px; }
+        button { flex: 1; padding: 12px; border: none; border-radius: 8px; font-weight: 600; font-size: 14px; cursor: pointer; transition: all 0.2s ease; }
+        .btn-tp { background-color: var(--accent-red); color: white; }
+        .btn-tp:hover { background-color: #dc2626; box-shadow: 0 0 12px rgba(239, 68, 68, 0.4); }
+        .btn-fp { background-color: #475569; color: white; }
+        .btn-fp:hover { background-color: #334155; }
+        #statusAlert { margin-top: 12px; padding: 10px; border-radius: 6px; font-size: 13px; display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div>
+            <h1>Mule Account Detection — Analyst Workbench</h1>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Human-in-the-Loop Explainability & Active Learning Feedback Loop</p>
+        </div>
+        <div>
+            <span class="badge-danger" id="riskBadge">HIGH RISK (85.0%)</span>
+        </div>
+    </div>
+
+    <div class="metrics-row">
+        <div class="metric-box"><label>Alert ID</label><val id="valAlertId">ALT-999</val></div>
+        <div class="metric-box"><label>Account ID</label><val id="valAccount">Acc1001</val></div>
+        <div class="metric-box"><label>Top Risk Factor</label><val style="color: #ef4444;">TDA $H_1$ Persistence</val></div>
+        <div class="metric-box"><label>Active Learning Stream</label><val style="color: #10b981;">Kafka Connected</val></div>
+    </div>
+
+    <div class="grid-container">
+        <!-- SHAP Feature Importance Chart -->
+        <div class="card">
+            <div class="card-title">
+                <span>SHAP Feature Drivers (Top 5)</span>
+                <span style="font-size: 11px; color: var(--text-muted);">XGBoost TreeExplainer</span>
+            </div>
+            <canvas id="shapChart" height="200"></canvas>
+        </div>
+
+        <!-- 2-Hop GNN Subgraph -->
+        <div class="card">
+            <div class="card-title">
+                <span>Influential 2-Hop Transaction Neighborhood</span>
+                <span style="font-size: 11px; color: var(--text-muted);">GraphSAGE GNNExplainer</span>
+            </div>
+            <ul class="edge-list" id="edgeList">
+                <!-- Dynamically populated -->
+            </ul>
+        </div>
+    </div>
+
+    <!-- Disposition Feedback Box -->
+    <div class="card" style="margin-top: 200px;">
+        <div class="card-title">
+            <span>Analyst Verdict Disposition</span>
+            <span style="font-size: 11px; color: var(--text-muted);">Pushes to 'analyst-feedback' Kafka stream</span>
+        </div>
+        <p style="font-size: 13px; color: var(--text-muted);">Submitting a verdict increments the active learning retraining trigger counter (retrains XGBoost model every 100 dispositions).</p>
+        <textarea id="analystNotes" placeholder="Enter investigation notes (e.g., 'Confirmed circular money laundering pattern between Acc1001, Account_102, and Account_104')..."></textarea>
+        
+        <div class="btn-group">
+            <button class="btn-tp" onclick="submitDisposition('TRUE_POSITIVE')">Confirm True Positive (Flag Mule)</button>
+            <button class="btn-fp" onclick="submitDisposition('FALSE_POSITIVE')">Mark False Positive (Dismiss Alert)</button>
+        </div>
+
+        <div id="statusAlert"></div>
+    </div>
+
+    <script>
+        let currentAlertId = "ALT-999";
+        let currentAccountId = "Acc1001";
+
+        async function loadReport() {
+            try {
+                const res = await fetch(`/api/alerts/${currentAlertId}/explanation?account_id=${currentAccountId}&fraud_probability=0.85`);
+                const data = await res.json();
+                
+                // Update SHAP Chart
+                const labels = data.shap_top_drivers.map(d => d.feature);
+                const values = data.shap_top_drivers.map(d => d.shap_value * 100);
+                
+                const ctx = document.getElementById('shapChart').getContext('2d');
+                new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'SHAP Risk Contribution (%)',
+                            data: values,
+                            backgroundColor: values.map(v => v > 0 ? '#ef4444' : '#10b981'),
+                            borderRadius: 6
+                        }]
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        plugins: { legend: { display: false } },
+                        scales: { x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }, y: { ticks: { color: '#f8fafc' } } }
+                    }
+                });
+
+                // Update Edge List
+                const edgeListEl = document.getElementById('edgeList');
+                edgeListEl.innerHTML = '';
+                data.gnn_subgraph_explanation.influential_edges.forEach(edge => {
+                    const li = document.createElement('li');
+                    li.className = 'edge-item';
+                    li.innerHTML = `<span>⚡ <strong>${edge.source}</strong> ➔ <strong>${edge.target}</strong></span> <span class="edge-score">GNN Weight: ${(edge.importance_score * 100).toFixed(1)}%</span>`;
+                    edgeListEl.appendChild(li);
+                });
+
+            } catch (err) {
+                console.error("Error loading report:", err);
+            }
+        }
+
+        async function submitDisposition(status) {
+            const notes = document.getElementById('analystNotes').value;
+            const alertBox = document.getElementById('statusAlert');
+            
+            try {
+                const res = await fetch(`/api/alerts/${currentAlertId}/disposition`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        status: status,
+                        analyst_notes: notes,
+                        account_id: currentAccountId
+                    })
+                });
+                
+                const data = await res.json();
+                
+                alertBox.style.display = 'block';
+                if (res.ok) {
+                    alertBox.style.backgroundColor = status === 'TRUE_POSITIVE' ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+                    alertBox.style.color = status === 'TRUE_POSITIVE' ? '#ef4444' : '#10b981';
+                    alertBox.style.border = `1px solid ${status === 'TRUE_POSITIVE' ? '#ef4444' : '#10b981'}`;
+                    alertBox.innerHTML = `✅ <strong>Disposition Recorded:</strong> ${data.status} for ${data.alert_id} published to Kafka stream '${data.topic}'!`;
+                } else {
+                    alertBox.style.backgroundColor = 'rgba(239, 68, 68, 0.2)';
+                    alertBox.style.color = '#ef4444';
+                    alertBox.innerHTML = `❌ Error: ${data.detail || 'Submission failed'}`;
+                }
+            } catch (err) {
+                console.error("Submission error:", err);
+            }
+        }
+
+        window.onload = loadReport;
+    </script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse)
+def get_dashboard():
+    """Interactive Analyst Fraud Investigation Workspace."""
+    return HTMLResponse(content=DASHBOARD_HTML)
 
 
 @app.get("/api/alerts/{alert_id}/explanation")

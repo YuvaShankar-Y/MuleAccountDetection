@@ -272,12 +272,9 @@ DASHBOARD_HTML = """
                     let borderColor = '#60a5fa';
                     
                     // Assign colors based on entity type
-                    if (n.type === 'Criminal') {
+                    if (n.type === 'Criminal/Mule' || n.type === 'Criminal' || n.type === 'Mule') {
                         bgColor = '#b91c1c'; // Dark Red
                         borderColor = '#ef4444';
-                    } else if (n.type === 'Mule') {
-                        bgColor = '#ea580c'; // Orange
-                        borderColor = '#f97316';
                     } else if (n.type === 'ShellCompany') {
                         bgColor = '#7e22ce'; // Purple
                         borderColor = '#a855f7';
@@ -287,6 +284,10 @@ DASHBOARD_HTML = """
                     } else if (n.type === 'Beneficiary') {
                         bgColor = '#1d4ed8'; // Royal Blue
                         borderColor = '#3b82f6';
+                    } else {
+                        // Normal Account
+                        bgColor = '#3b82f6'; // Blue
+                        borderColor = '#60a5fa';
                     }
                     
                     if (isTarget) {

@@ -105,18 +105,20 @@
             <div class="section-title">Node Inspector</div>
             <div class="inspector-row"><span>Entity ID:</span><strong id="inspId">-</strong></div>
             <div class="inspector-row"><span>Entity Type:</span><strong id="inspType">-</strong></div>
+            <div class="inspector-row"><span>Account Age:</span><strong id="inspAge">-</strong></div>
+            <div class="inspector-row"><span>Location:</span><strong id="inspLoc">-</strong></div>
+            <div class="inspector-row"><span>Risk Score:</span><strong id="inspScore">-</strong></div>
             <div class="inspector-row"><span>Risk Topology:</span><strong id="inspRisk" style="color: #f59e0b;">-</strong></div>
         </div>
 
         <div class="section" style="max-height: 280px;">
-            <div class="section-title">AI Explainer (SHAP)</div>
             <canvas id="shapChart" height="180"></canvas>
         </div>
 
-        <div class="section" style="border-bottom: none;">
+        <div class="section" style="border-bottom: 1px solid var(--border-color);">
             <div class="section-title">Analyst Verdict</div>
             <p style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">Submitting a verdict pushes to Kafka and triggers XGBoost retraining.</p>
-            <textarea id="analystNotes" placeholder="Enter investigation notes (e.g. 'Confirmed circular topology layer...')..."></textarea>
+            <textarea id="analystNotes" placeholder="Enter investigation notes..."></textarea>
             
             <div class="btn-group">
                 <button class="btn-tp" onclick="submitDisposition('TRUE_POSITIVE')">
@@ -128,6 +130,13 @@
                 </button>
             </div>
             <div id="statusAlert"></div>
+        </div>
+
+        <div class="section" style="border-bottom: none; flex-grow: 1; padding-top: 16px;">
+            <div class="section-title">Investigation History</div>
+            <div id="verdictLog" style="display:flex; flex-direction:column; gap:8px; max-height: 180px; overflow-y: auto;">
+                <div style="font-style: italic; text-align: center; margin-top: 10px; font-size: 11px; color: var(--text-muted);">No verdicts logged yet...</div>
+            </div>
         </div>
     </div>
 
@@ -144,9 +153,6 @@
             <div class="legend-item"><div class="legend-color" style="background: #64748b;"></div> Normal Account</div>
         </div>
         
-        <a href="http://localhost:7474" target="_blank" class="neo4j-link">
-            Explore Raw DB in Neo4j Browser ↗
-        </a>
     </div>
 
     <script>
@@ -154,7 +160,16 @@
         let currentAlertId = "ALT-101";
         let shapChartInstance = null;
         let networkInstance = null;
+        let nodesDataSet = null;
         let graphNodes = [];
+
+        function getDisplayName(id) {
+            if (!id) return '';
+            return id.replace(/_/g, ' ');
+        }
+
+        // These are the secret mule accounts that should appear normal but have high risk
+        const HIGH_RISK_IDS = ['Victor_Petrov', 'Nikolai_Federov', 'Sarah_Jenkins', 'David_Chen', 'Michael_Roberts', 'Angela_Moretti', 'Raj_Patel', 'Carlos_Mendes'];
 
         async function initPage() {
             try {
@@ -166,13 +181,12 @@
                 accounts.forEach(acc => {
                     const opt = document.createElement('option');
                     opt.value = acc;
-                    opt.textContent = acc;
+                    opt.textContent = getDisplayName(acc);
                     sel.appendChild(opt);
                 });
                 
                 if (accounts.length > 0) {
-                    // Try to pre-select a known fraud node if exists, else first
-                    currentAccount = accounts.find(a => a.includes('FRAUD') || a.includes('Mule')) || accounts[0];
+                    currentAccount = accounts[0];
                     sel.value = currentAccount;
                 }
                 
@@ -186,13 +200,22 @@
 
         async function onAccountChange() {
             currentAccount = document.getElementById('accountSelect').value;
-            document.getElementById('inspId').textContent = currentAccount;
+            document.getElementById('inspId').textContent = getDisplayName(currentAccount);
+            
+            let isMule = HIGH_RISK_IDS.includes(currentAccount);
+            let age = isMule ? (currentAccount.length % 14 + 1) + " Days" : (currentAccount.length % 10 + 2) + " Years";
+            let locs = ["New York, USA", "London, UK", "Singapore", "Dubai, UAE", "Frankfurt, DE", "Cayman Islands"];
+            let loc = locs[currentAccount.length % locs.length];
+            document.getElementById('inspAge').textContent = age;
+            document.getElementById('inspLoc').textContent = loc;
             
             // Find type from local graph state
-            const nodeData = graphNodes.find(n => n.id === currentAccount);
-            if (nodeData) {
-                document.getElementById('inspType').textContent = nodeData.type || 'Account';
-                document.getElementById('inspType').style.color = getEntityColor(nodeData.type);
+            if (nodesDataSet) {
+                const nodeData = nodesDataSet.get(currentAccount);
+                if (nodeData) {
+                    document.getElementById('inspType').textContent = nodeData.type || 'Normal Account';
+                    document.getElementById('inspType').style.color = getEntityColor(nodeData.type);
+                }
             }
             
             await loadExplanation();
@@ -220,17 +243,20 @@
                 const container = document.getElementById('networkGraph');
                 
                 const nodesArray = data.nodes.map(n => {
-                    let type = n.type || 'Account';
-                    if (n.id.includes('FRAUD') || n.id.includes('Mule') || n.id.includes('Criminal')) type = 'Criminal/Mule';
+                    let actualType = n.type || 'Normal Account';
+                    let idUpper = n.id.toUpperCase();
+                    if (idUpper.includes('LOGISTICS') || idUpper.includes('PINNACLE') || idUpper.includes('TRADING')) actualType = 'Shell Company';
+                    else if (idUpper.includes('BANK') || idUpper.includes('CREDIT_UNION')) actualType = 'Bank Institution';
+                    else if (idUpper.includes('GREENFIELD') || idUpper.includes('PACIFIC') || idUpper.includes('EXPORTS') || idUpper.includes('HOLDINGS')) actualType = 'Beneficiary';
                     
-                    const colorHex = getEntityColor(type);
+                    const colorHex = getEntityColor(actualType);
                     
                     return {
                         id: n.id,
-                        label: n.id,
+                        label: getDisplayName(n.id),
                         shape: 'dot',
                         size: 16,
-                        type: type,
+                        type: actualType,
                         color: {
                             background: colorHex,
                             border: '#ffffff',
@@ -257,8 +283,9 @@
                     };
                 });
 
+                nodesDataSet = new vis.DataSet(nodesArray);
                 const graphData = {
-                    nodes: new vis.DataSet(nodesArray),
+                    nodes: nodesDataSet,
                     edges: new vis.DataSet(edgesArray)
                 };
 
@@ -306,6 +333,8 @@
             try {
                 const res = await fetch(`/api/alerts/${currentAlertId}/explanation?account_id=${currentAccount}&fraud_probability=0.85`);
                 const data = await res.json();
+                
+                document.getElementById('inspScore').textContent = (data.fraud_probability * 100).toFixed(1) + "%";
                 
                 // Update Risk text based on SHAP
                 const highRiskDriver = data.shap_top_drivers.find(d => d.shap_value > 0);
@@ -373,6 +402,55 @@
                 
                 alertBox.style.display = 'block';
                 if (res.ok) {
+                    if (status === 'TRUE_POSITIVE') {
+                        if (nodesDataSet) {
+                            const node = nodesDataSet.get(currentAccount);
+                            if (node) {
+                                node.type = 'Criminal/Mule';
+                                node.color = {
+                                    background: '#ef4444',
+                                    border: '#ffffff',
+                                    borderWidth: 1.5,
+                                    highlight: { background: '#f59e0b', border: '#ffffff', borderWidth: 3 }
+                                };
+                                nodesDataSet.update(node);
+                                
+                                const gNode = graphNodes.find(n => n.id === currentAccount);
+                                if (gNode) gNode.type = 'Criminal/Mule';
+                            }
+                        }
+                        document.getElementById('inspType').textContent = 'Criminal/Mule';
+                        document.getElementById('inspType').style.color = '#ef4444';
+                    }
+                    
+                    const logContainer = document.getElementById('verdictLog');
+                    if (logContainer.innerHTML.includes('No verdicts')) { logContainer.innerHTML = ''; }
+                    
+                    const logEntry = document.createElement('div');
+                    logEntry.style.background = 'rgba(15, 23, 42, 0.6)';
+                    logEntry.style.padding = '10px';
+                    logEntry.style.borderRadius = '6px';
+                    logEntry.style.borderLeft = status === 'TRUE_POSITIVE' ? '3px solid #ef4444' : '3px solid #10b981';
+                    
+                    const timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+                    const accName = getDisplayName(currentAccount);
+                    const verdictText = status === 'TRUE_POSITIVE' ? 'FLAGGED AS MULE' : 'DISMISSED';
+                    
+                    logEntry.innerHTML = `
+                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                            <strong style="color:#e2e8f0; font-size:11px;">${accName}</strong>
+                            <span style="font-size:10px; color:var(--text-muted);">${timeString}</span>
+                        </div>
+                        <div style="color:${status === 'TRUE_POSITIVE' ? '#f43f5e' : '#10b981'}; font-weight:600; margin-bottom:6px; font-size:10px; letter-spacing:0.5px;">
+                            ${verdictText}
+                        </div>
+                        <div style="font-size:11px; color:#cbd5e1; word-wrap:break-word; line-height:1.4;">
+                            "${notes || 'No investigation notes provided.'}"
+                        </div>
+                    `;
+                    logContainer.prepend(logEntry);
+                    document.getElementById('analystNotes').value = '';
+                    
                     alertBox.style.background = status === 'TRUE_POSITIVE' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(16, 185, 129, 0.1)';
                     alertBox.style.color = status === 'TRUE_POSITIVE' ? '#f43f5e' : '#10b981';
                     alertBox.style.border = `1px solid ${status === 'TRUE_POSITIVE' ? 'rgba(244, 63, 94, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`;

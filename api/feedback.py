@@ -51,7 +51,9 @@ def get_kafka_producer() -> KafkaProducer:
             producer = KafkaProducer(
                 bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-                retries=3,
+                retries=1,
+                max_block_ms=500,
+                request_timeout_ms=500,
             )
         except Exception as e:
             logger.warning(f"Kafka Producer connection deferred/failed: {e}")

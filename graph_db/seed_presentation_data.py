@@ -17,26 +17,29 @@ def seed_database():
     
     # Nodes to create
     nodes = [
-        {"id": "Criminal_Syndicate_X", "type": "Criminal", "risk": "High"},
-        {"id": "DarkWeb_Vendor_Y", "type": "Criminal", "risk": "High"},
+        # --- Hidden high-risk accounts (will appear normal until flagged) ---
+        {"id": "Victor_Petrov", "type": "Account", "risk": "High"},
+        {"id": "Nikolai_Federov", "type": "Account", "risk": "High"},
         
-        {"id": "Mule_Account_01", "type": "Mule", "risk": "High"},
-        {"id": "Mule_Account_02", "type": "Mule", "risk": "High"},
-        {"id": "Mule_Account_03", "type": "Mule", "risk": "High"},
-        {"id": "Mule_Account_04", "type": "Mule", "risk": "High"},
-        {"id": "Mule_Account_05", "type": "Mule", "risk": "High"},
-        {"id": "Mule_Account_06", "type": "Mule", "risk": "High"},
+        {"id": "Sarah_Jenkins", "type": "Account", "risk": "High"},
+        {"id": "David_Chen", "type": "Account", "risk": "High"},
+        {"id": "Michael_Roberts", "type": "Account", "risk": "High"},
+        {"id": "Angela_Moretti", "type": "Account", "risk": "High"},
+        {"id": "Raj_Patel", "type": "Account", "risk": "High"},
+        {"id": "Carlos_Mendes", "type": "Account", "risk": "High"},
         
-        {"id": "Shell_Company_Alpha", "type": "ShellCompany", "risk": "High"},
-        {"id": "Shell_Company_Beta", "type": "ShellCompany", "risk": "High"},
+        {"id": "Apex_Logistics_Ltd", "type": "ShellCompany", "risk": "High"},
+        {"id": "Pinnacle_Trading_Co", "type": "ShellCompany", "risk": "High"},
         
+        # --- Banks ---
         {"id": "Global_Bank_Inc", "type": "Bank", "risk": "Low"},
         {"id": "Local_Credit_Union", "type": "Bank", "risk": "Low"},
         
-        {"id": "Legitimate_Business_LLC", "type": "Beneficiary", "risk": "Low"},
-        {"id": "Offshore_Holding_Corp", "type": "Beneficiary", "risk": "Medium"},
+        # --- Beneficiaries ---
+        {"id": "Greenfield_Exports_LLC", "type": "Beneficiary", "risk": "Low"},
+        {"id": "Pacific_Rim_Holdings", "type": "Beneficiary", "risk": "Medium"},
         
-        # Normal customers/regular people
+        # --- Normal customers/regular people ---
         {"id": "John_Smith", "type": "Account", "risk": "Low"},
         {"id": "Mary_Johnson", "type": "Account", "risk": "Low"},
         {"id": "Robert_Davis", "type": "Account", "risk": "Low"},
@@ -61,39 +64,39 @@ def seed_database():
     
     # Relationships to create
     edges = [
-        # Placement
-        ("Criminal_Syndicate_X", "Mule_Account_01", 150000),
-        ("DarkWeb_Vendor_Y", "Shell_Company_Alpha", 80000),
+        # Placement (high-value initial deposits from hidden criminals)
+        ("Victor_Petrov", "Sarah_Jenkins", 150000),
+        ("Nikolai_Federov", "Apex_Logistics_Ltd", 80000),
         
         # Layering - First level
-        ("Mule_Account_01", "Mule_Account_02", 50000),
-        ("Mule_Account_01", "Mule_Account_03", 50000),
-        ("Mule_Account_01", "Shell_Company_Alpha", 50000),
+        ("Sarah_Jenkins", "David_Chen", 50000),
+        ("Sarah_Jenkins", "Michael_Roberts", 50000),
+        ("Sarah_Jenkins", "Apex_Logistics_Ltd", 50000),
         
-        # Layering - Second level and LOOP 1 (Mule_02 -> Mule_04 -> Mule_05 -> Mule_02)
-        ("Mule_Account_02", "Mule_Account_04", 50000),
-        ("Mule_Account_04", "Mule_Account_05", 40000),
-        ("Mule_Account_05", "Mule_Account_02", 10000), # Loop edge
-        ("Mule_Account_05", "Shell_Company_Beta", 30000),
-        ("Mule_Account_04", "Mule_Account_06", 10000),
+        # Layering - Second level and LOOP 1 (David -> Angela -> Raj -> David)
+        ("David_Chen", "Angela_Moretti", 50000),
+        ("Angela_Moretti", "Raj_Patel", 40000),
+        ("Raj_Patel", "David_Chen", 10000),        # Loop edge
+        ("Raj_Patel", "Pinnacle_Trading_Co", 30000),
+        ("Angela_Moretti", "Carlos_Mendes", 10000),
         
-        # Layering - Shell company complex and LOOP 2 (Shell_Alpha -> Mule_03 -> Shell_Beta -> Shell_Alpha)
-        ("Shell_Company_Alpha", "Mule_Account_03", 60000),
-        ("Shell_Company_Alpha", "Shell_Company_Beta", 70000),
-        ("Mule_Account_03", "Shell_Company_Beta", 110000),
-        ("Shell_Company_Beta", "Shell_Company_Alpha", 20000), # Loop edge
+        # Layering - Shell company complex and LOOP 2 (Apex -> Michael -> Pinnacle -> Apex)
+        ("Apex_Logistics_Ltd", "Michael_Roberts", 60000),
+        ("Apex_Logistics_Ltd", "Pinnacle_Trading_Co", 70000),
+        ("Michael_Roberts", "Pinnacle_Trading_Co", 110000),
+        ("Pinnacle_Trading_Co", "Apex_Logistics_Ltd", 20000),  # Loop edge
         
         # Integration
-        ("Shell_Company_Beta", "Mule_Account_06", 190000),
-        ("Mule_Account_06", "Global_Bank_Inc", 200000),
+        ("Pinnacle_Trading_Co", "Carlos_Mendes", 190000),
+        ("Carlos_Mendes", "Global_Bank_Inc", 200000),
         
         # Final Destination
-        ("Global_Bank_Inc", "Legitimate_Business_LLC", 50000),
-        ("Global_Bank_Inc", "Offshore_Holding_Corp", 150000),
+        ("Global_Bank_Inc", "Greenfield_Exports_LLC", 50000),
+        ("Global_Bank_Inc", "Pacific_Rim_Holdings", 150000),
         
         # Extra noise to Local Credit Union
-        ("Mule_Account_03", "Local_Credit_Union", 10000),
-        ("Local_Credit_Union", "Legitimate_Business_LLC", 10000),
+        ("Michael_Roberts", "Local_Credit_Union", 10000),
+        ("Local_Credit_Union", "Greenfield_Exports_LLC", 10000),
         
         # Normal customer transactions (legitimate activity)
         ("John_Smith", "Mary_Johnson", 500),
@@ -125,9 +128,9 @@ def seed_database():
         ("David_Miller", "Global_Bank_Inc", 2500),
         
         # Some normal customers transact with legitimate businesses
-        ("William_Thomas", "Legitimate_Business_LLC", 1800),
-        ("Patricia_Jackson", "Legitimate_Business_LLC", 2200),
-        ("Thomas_Martin", "Legitimate_Business_LLC", 1600)
+        ("William_Thomas", "Greenfield_Exports_LLC", 1800),
+        ("Patricia_Jackson", "Greenfield_Exports_LLC", 2200),
+        ("Thomas_Martin", "Greenfield_Exports_LLC", 1600)
     ]
 
     try:

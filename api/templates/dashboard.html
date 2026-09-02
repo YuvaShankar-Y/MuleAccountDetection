@@ -123,13 +123,12 @@
             <div class="btn-group">
                 <button class="btn-tp" onclick="submitDisposition('TRUE_POSITIVE')">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-                    Flag as True Positive (Fraud)
+                    Flag as True Positive
                 </button>
                 <button class="btn-fp" onclick="submitDisposition('FALSE_POSITIVE')">
-                    Dismiss (False Positive)
+                    Dismiss
                 </button>
             </div>
-            <div id="statusAlert"></div>
         </div>
 
         <div class="section" style="border-bottom: none; flex-grow: 1; padding-top: 16px;">
@@ -161,6 +160,7 @@
         let shapChartInstance = null;
         let networkInstance = null;
         let nodesDataSet = null;
+        let edgesDataSet = null;
         let graphNodes = [];
 
         function getDisplayName(id) {
@@ -170,6 +170,22 @@
 
         // These are the secret mule accounts that should appear normal but have high risk
         const HIGH_RISK_IDS = ['Victor_Petrov', 'Nikolai_Federov', 'Sarah_Jenkins', 'David_Chen', 'Michael_Roberts', 'Angela_Moretti', 'Raj_Patel', 'Carlos_Mendes'];
+
+        // Actual cycles in the transaction graph
+        const CYCLES = {
+            cycle1: [
+                {from: 'David_Chen', to: 'Angela_Moretti'},
+                {from: 'Angela_Moretti', to: 'Raj_Patel'},
+                {from: 'Raj_Patel', to: 'David_Chen'}
+            ],
+            cycle2: [
+                {from: 'Apex_Logistics_Ltd', to: 'Michael_Roberts'},
+                {from: 'Michael_Roberts', to: 'Pinnacle_Trading_Co'},
+                {from: 'Pinnacle_Trading_Co', to: 'Apex_Logistics_Ltd'}
+            ]
+        };
+        const CYCLE_1_MEMBERS = ['David_Chen', 'Angela_Moretti', 'Raj_Patel'];
+        const CYCLE_2_MEMBERS = ['Apex_Logistics_Ltd', 'Michael_Roberts', 'Pinnacle_Trading_Co'];
 
         async function initPage() {
             try {
@@ -284,9 +300,10 @@
                 });
 
                 nodesDataSet = new vis.DataSet(nodesArray);
+                edgesDataSet = new vis.DataSet(edgesArray);
                 const graphData = {
                     nodes: nodesDataSet,
-                    edges: new vis.DataSet(edgesArray)
+                    edges: edgesDataSet
                 };
 
                 const options = {
@@ -346,6 +363,9 @@
                     document.getElementById('inspRisk').textContent = 'NORMAL EXPECTED FLOW';
                     document.getElementById('inspRisk').style.color = '#10b981';
                 }
+
+                // Highlight cycle edges if Circular Money Flow is detected
+                highlightCycles(highRiskDriver ? highRiskDriver.feature : '');
                 
                 const labels = data.shap_top_drivers.map(d => d.feature.replace(/_/g, ' '));
                 const values = data.shap_top_drivers.map(d => d.shap_value * 100);
@@ -383,88 +403,130 @@
             }
         }
 
+        function highlightCycles(topFeature) {
+            if (!edgesDataSet) return;
+            
+            // Reset all edges to default
+            edgesDataSet.forEach(edge => {
+                edgesDataSet.update({
+                    id: edge.id,
+                    color: { color: 'rgba(96, 165, 250, 0.4)', highlight: '#f59e0b' },
+                    width: 1.5,
+                    dashes: false
+                });
+            });
+
+            if (topFeature === 'Circular Money Flow') {
+                // Highlight the actual cycle loop edges in RED dashes
+                let activeCycle = null;
+                if (CYCLE_1_MEMBERS.includes(currentAccount)) activeCycle = CYCLES.cycle1;
+                else if (CYCLE_2_MEMBERS.includes(currentAccount)) activeCycle = CYCLES.cycle2;
+                if (!activeCycle) return;
+
+                edgesDataSet.forEach(edge => {
+                    const match = activeCycle.find(c => c.from === edge.from && c.to === edge.to);
+                    if (match) {
+                        edgesDataSet.update({
+                            id: edge.id,
+                            color: { color: '#ef4444', highlight: '#f59e0b' },
+                            width: 4,
+                            dashes: [8, 4]
+                        });
+                    }
+                });
+
+            } else if (topFeature === 'Rapid Fund Transfers') {
+                // Highlight OUTGOING edges from the source node in AMBER
+                edgesDataSet.forEach(edge => {
+                    if (edge.from === currentAccount) {
+                        edgesDataSet.update({
+                            id: edge.id,
+                            color: { color: '#f59e0b', highlight: '#fbbf24' },
+                            width: 4,
+                            dashes: false
+                        });
+                    }
+                });
+
+            } else if (topFeature === 'High 30-Day Volume') {
+                // Highlight ALL edges touching the hub node in PURPLE
+                edgesDataSet.forEach(edge => {
+                    if (edge.from === currentAccount || edge.to === currentAccount) {
+                        edgesDataSet.update({
+                            id: edge.id,
+                            color: { color: '#a855f7', highlight: '#c084fc' },
+                            width: 3.5,
+                            dashes: false
+                        });
+                    }
+                });
+            }
+        }
+
         async function submitDisposition(status) {
             const notes = document.getElementById('analystNotes').value;
-            const alertBox = document.getElementById('statusAlert');
             
-            try {
-                const res = await fetch(`/api/alerts/${currentAlertId}/disposition`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        status: status,
-                        analyst_notes: notes,
-                        account_id: currentAccount
-                    })
-                });
-                
-                const data = await res.json();
-                
-                alertBox.style.display = 'block';
-                if (res.ok) {
-                    if (status === 'TRUE_POSITIVE') {
-                        if (nodesDataSet) {
-                            const node = nodesDataSet.get(currentAccount);
-                            if (node) {
-                                node.type = 'Criminal/Mule';
-                                node.color = {
-                                    background: '#ef4444',
-                                    border: '#ffffff',
-                                    borderWidth: 1.5,
-                                    highlight: { background: '#f59e0b', border: '#ffffff', borderWidth: 3 }
-                                };
-                                nodesDataSet.update(node);
-                                
-                                const gNode = graphNodes.find(n => n.id === currentAccount);
-                                if (gNode) gNode.type = 'Criminal/Mule';
-                            }
-                        }
-                        document.getElementById('inspType').textContent = 'Criminal/Mule';
-                        document.getElementById('inspType').style.color = '#ef4444';
+            // --- INSTANT visual updates (no waiting) ---
+            if (status === 'TRUE_POSITIVE') {
+                if (nodesDataSet) {
+                    const node = nodesDataSet.get(currentAccount);
+                    if (node) {
+                        node.type = 'Criminal/Mule';
+                        node.color = {
+                            background: '#ef4444',
+                            border: '#ffffff',
+                            borderWidth: 1.5,
+                            highlight: { background: '#f59e0b', border: '#ffffff', borderWidth: 3 }
+                        };
+                        nodesDataSet.update(node);
+                        
+                        const gNode = graphNodes.find(n => n.id === currentAccount);
+                        if (gNode) gNode.type = 'Criminal/Mule';
                     }
-                    
-                    const logContainer = document.getElementById('verdictLog');
-                    if (logContainer.innerHTML.includes('No verdicts')) { logContainer.innerHTML = ''; }
-                    
-                    const logEntry = document.createElement('div');
-                    logEntry.style.background = 'rgba(15, 23, 42, 0.6)';
-                    logEntry.style.padding = '10px';
-                    logEntry.style.borderRadius = '6px';
-                    logEntry.style.borderLeft = status === 'TRUE_POSITIVE' ? '3px solid #ef4444' : '3px solid #10b981';
-                    
-                    const timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
-                    const accName = getDisplayName(currentAccount);
-                    const verdictText = status === 'TRUE_POSITIVE' ? 'FLAGGED AS MULE' : 'DISMISSED';
-                    
-                    logEntry.innerHTML = `
-                        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
-                            <strong style="color:#e2e8f0; font-size:11px;">${accName}</strong>
-                            <span style="font-size:10px; color:var(--text-muted);">${timeString}</span>
-                        </div>
-                        <div style="color:${status === 'TRUE_POSITIVE' ? '#f43f5e' : '#10b981'}; font-weight:600; margin-bottom:6px; font-size:10px; letter-spacing:0.5px;">
-                            ${verdictText}
-                        </div>
-                        <div style="font-size:11px; color:#cbd5e1; word-wrap:break-word; line-height:1.4;">
-                            "${notes || 'No investigation notes provided.'}"
-                        </div>
-                    `;
-                    logContainer.prepend(logEntry);
-                    document.getElementById('analystNotes').value = '';
-                    
-                    alertBox.style.background = status === 'TRUE_POSITIVE' ? 'rgba(244, 63, 94, 0.1)' : 'rgba(16, 185, 129, 0.1)';
-                    alertBox.style.color = status === 'TRUE_POSITIVE' ? '#f43f5e' : '#10b981';
-                    alertBox.style.border = `1px solid ${status === 'TRUE_POSITIVE' ? 'rgba(244, 63, 94, 0.3)' : 'rgba(16, 185, 129, 0.3)'}`;
-                    alertBox.innerHTML = `✅ Disposition saved to Kafka:<br/><strong>${data.topic}</strong>`;
-                } else {
-                    alertBox.style.background = 'rgba(244, 63, 94, 0.1)';
-                    alertBox.style.color = '#f43f5e';
-                    alertBox.innerHTML = `❌ Error: ${data.detail || 'Submission failed'}`;
                 }
-                
-                setTimeout(() => { alertBox.style.display = 'none'; }, 4000);
-            } catch (err) {
-                console.error("Submission error:", err);
+                document.getElementById('inspType').textContent = 'Criminal/Mule';
+                document.getElementById('inspType').style.color = '#ef4444';
             }
+            
+            // Log to Investigation History instantly
+            const logContainer = document.getElementById('verdictLog');
+            if (logContainer.innerHTML.includes('No verdicts')) { logContainer.innerHTML = ''; }
+            
+            const logEntry = document.createElement('div');
+            logEntry.style.background = 'rgba(15, 23, 42, 0.6)';
+            logEntry.style.padding = '10px';
+            logEntry.style.borderRadius = '6px';
+            logEntry.style.borderLeft = status === 'TRUE_POSITIVE' ? '3px solid #ef4444' : '3px solid #10b981';
+            
+            const timeString = new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'});
+            const accName = getDisplayName(currentAccount);
+            const verdictText = status === 'TRUE_POSITIVE' ? 'FLAGGED AS MULE' : 'DISMISSED';
+            
+            logEntry.innerHTML = `
+                <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+                    <strong style="color:#e2e8f0; font-size:11px;">${accName}</strong>
+                    <span style="font-size:10px; color:var(--text-muted);">${timeString}</span>
+                </div>
+                <div style="color:${status === 'TRUE_POSITIVE' ? '#f43f5e' : '#10b981'}; font-weight:600; margin-bottom:6px; font-size:10px; letter-spacing:0.5px;">
+                    ${verdictText}
+                </div>
+                <div style="font-size:11px; color:#cbd5e1; word-wrap:break-word; line-height:1.4;">
+                    "${notes || 'No investigation notes provided.'}"
+                </div>
+            `;
+            logContainer.prepend(logEntry);
+            document.getElementById('analystNotes').value = '';
+
+            // --- Fire API call in background (non-blocking) ---
+            fetch(`/api/alerts/${currentAlertId}/disposition`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    status: status,
+                    analyst_notes: notes,
+                    account_id: currentAccount
+                })
+            }).catch(err => console.log('Background sync:', err));
         }
 
         window.onload = initPage;

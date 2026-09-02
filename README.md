@@ -2,7 +2,7 @@
 
 A real-time, explainable AI platform designed to detect and visualize complex money laundering networks and "Mule Accounts" using Graph Analytics, GNNs, XGBoost, and SHAP. Built for Smart India Hackathon (SIH).
 
-## 🚀 How to Run the Application
+##  How to Run the Application
 
 ### Prerequisites
 - Python 3.8+
@@ -42,7 +42,7 @@ http://localhost:8000/dashboard
 
 ---
 
-## 🧠 System Architecture & Workflow
+##  System Architecture & Workflow
 
 How does the application actually catch money launderers? Here is the flow from transaction ingestion to human-in-the-loop retraining:
 
